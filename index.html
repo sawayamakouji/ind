@@ -34,6 +34,8 @@
   .chip { display:inline-block; padding:2px 6px; border:1px solid #ddd; border-radius:999px; font-size:11px; margin-right:6px; }
 </style>
 </head>
+
+<body>
 <h1>ローカルPOS集計ツール（DuckDB-WASM／インストール不要）</h1>
 <div class="muted">CSVを読み込み、カテゴリ別や商品名別の販売点数／販売金額を高速に集計します。ファイルはPC内だけで処理され、外部送信されません。</div>
 
@@ -311,5 +313,5 @@ const conn = await db.connect();
     resultDiv.appendChild(table);
   }
 </script>
-
+</body>
 </html>
