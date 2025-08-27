@@ -184,6 +184,19 @@ console.log('DuckDB ready');
 
   const fileEl = $('file');
   const loadBtn = $('load');
+
+  // ボタンがsubmit扱いにならないよう明示
+  document.getElementById('load').setAttribute('type', 'button');
+
+  // ファイル選択時に状態表示
+  fileEl.addEventListener('change', () => {
+    const f = fileEl.files?.[0];
+    if (f) {
+      status(`選択: ${f.name}（${fmt.format(f.size)} bytes）`);
+    } else {
+      status('ファイル未読込み');
+    }
+  });
   const runBtn = $('run');
   const exportBtn = $('export');
   const sqlBox = $('sql');
@@ -220,57 +233,66 @@ console.log('DuckDB ready');
   const escQ = (s) => String(s).replace(/'/g, "''");
 
   loadBtn.onclick = async () => {
-    const file = fileEl.files?.[0];
-    if (!file) { alert('CSVファイルを選択してください'); return; }
-    currentTable = (tblBox.value || 't').trim();
-    const maxRows = parseInt(maxRowsEl.value || '1000', 10);
+    try {
+      const file = fileEl.files?.[0];
+      if (!file) { alert('CSVファイルを選択してください'); return; }
 
-    status('読み込み中...');
-    const buf = new Uint8Array(await file.arrayBuffer());
-    const path = `/tmp/${file.name}`;
-    await db.copyFileToFS(path, buf);
+      currentTable = (tblBox.value || 't').trim();
+      const maxRows = parseInt(maxRowsEl.value || '1000', 10);
 
-    await conn.query(`DROP TABLE IF EXISTS ${currentTable};`);
-    await conn.query(`CREATE TABLE ${currentTable} AS SELECT * FROM read_csv_auto('${path}', HEADER=TRUE, SAMPLE_SIZE=-1);`);
+      status(`読み込み中... ${file.name}（${fmt.format(file.size)} bytes）`);
+      console.log('read start', file.name, file.size);
 
-    const res = await conn.query(`PRAGMA table_info(${currentTable});`);
-    const rows = res.toArray().map(Object.fromEntries);
-    headerList = rows.map(r => r.name);
-    renderHeaders(headerList);
+      const buf  = new Uint8Array(await file.arrayBuffer());
+      const path = `/tmp/${file.name}`;
+      await db.copyFileToFS(path, buf);
 
-    fillSelectOptions(colDate, headerList, 'date');
-    fillSelectOptions(colCat, headerList, 'category');
-    fillSelectOptions(colName, headerList, 'name');
-    fillSelectOptions(colQty, headerList, 'qty');
-    fillSelectOptions(colAmt, headerList, 'amount');
+      await conn.query(`DROP TABLE IF EXISTS ${currentTable};`);
+      await conn.query(`CREATE TABLE ${currentTable} AS SELECT * FROM read_csv_auto('${path}', HEADER=TRUE, SAMPLE_SIZE=-1);`);
 
-    if (colDate.value) {
-      await conn.query(`CREATE OR REPLACE VIEW ${currentTable}_v AS SELECT *, TRY_CAST("${colDate.value}" AS DATE) AS __d FROM ${currentTable};`);
-      const mm = await conn.query(`SELECT MIN(__d) AS min_d, MAX(__d) AS max_d FROM ${currentTable}_v WHERE __d IS NOT NULL;`);
-      const [m] = mm.toArray().map(Object.fromEntries);
-      if (m?.min_d) fromEl.value = String(m.min_d).slice(0,10);
-      if (m?.max_d) toEl.value   = String(m.max_d).slice(0,10);
-    } else {
-      await conn.query(`CREATE OR REPLACE VIEW ${currentTable}_v AS SELECT * FROM ${currentTable};`);
+      const res   = await conn.query(`PRAGMA table_info(${currentTable});`);
+      const rows  = res.toArray().map(Object.fromEntries);
+      headerList  = rows.map(r => r.name);
+      renderHeaders(headerList);
+
+      fillSelectOptions(colDate, headerList, 'date');
+      fillSelectOptions(colCat,  headerList, 'category');
+      fillSelectOptions(colName, headerList, 'name');
+      fillSelectOptions(colQty,  headerList, 'qty');
+      fillSelectOptions(colAmt,  headerList, 'amount');
+
+      if (colDate.value) {
+        await conn.query(`CREATE OR REPLACE VIEW ${currentTable}_v AS SELECT *, TRY_CAST("${colDate.value}" AS DATE) AS __d FROM ${currentTable};`);
+        const mm = await conn.query(`SELECT MIN(__d) AS min_d, MAX(__d) AS max_d FROM ${currentTable}_v WHERE __d IS NOT NULL;`);
+        const [m] = mm.toArray().map(Object.fromEntries);
+        if (m?.min_d) fromEl.value = String(m.min_d).slice(0,10);
+        if (m?.max_d) toEl.value   = String(m.max_d).slice(0,10);
+      } else {
+        await conn.query(`CREATE OR REPLACE VIEW ${currentTable}_v AS SELECT * FROM ${currentTable};`);
+      }
+
+      // カテゴリプルダウン（WHEREでエイリアスを使わない版）
+      if (colCat.value) {
+        const cats = await conn.query(
+          `SELECT DISTINCT "${colCat.value}" AS c
+             FROM ${currentTable}_v
+            WHERE "${colCat.value}" IS NOT NULL AND "${colCat.value}" <> ''
+            ORDER BY c;`
+        );
+        const list = cats.toArray().map(Object.fromEntries).map(r => r.c).filter(v => v!=null && v!=='');
+        catEqEl.innerHTML = '<option value="">（無条件）</option>';
+        list.forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; catEqEl.appendChild(o); });
+      }
+
+      status(`読み込み完了：テーブル=${currentTable}（表示は先頭${maxRows}行まで）`);
+      const preview = await conn.query(`SELECT * FROM ${currentTable} LIMIT ${maxRows};`);
+      renderTable(preview, maxRows);
+
+    } catch (e) {
+      console.error('load error', e);
+      alert('読み込みエラー: ' + (e?.message || e));
+      status('エラー: ' + (e?.message || e));
     }
-
-    if (colCat.value) {
-      // OK: WHERE "元列名" ...
-const cats = await conn.query(
-  `SELECT DISTINCT "${colCat.value}" AS c
-     FROM ${currentTable}_v
-    WHERE "${colCat.value}" IS NOT NULL AND "${colCat.value}" <> ''
-    ORDER BY c;`
-);
-
-      const list = cats.toArray().map(Object.fromEntries).map(r => r.c).filter(v => v!=null && v!=='');
-      catEqEl.innerHTML = '<option value="">（無条件）</option>';
-      list.forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; catEqEl.appendChild(o); });
-    }
-
-    status(`読み込み完了：テーブル=${currentTable}（表示は先頭${maxRows}行まで）`);
-    const preview = await conn.query(`SELECT * FROM ${currentTable} LIMIT ${maxRows};`);
-    renderTable(preview, maxRows);
   };
 
   function grainExpr() {
@@ -325,6 +347,10 @@ const cats = await conn.query(
     table.appendChild(tbody);
     resultDiv.appendChild(table);
   }
+
+  window.duckdb = duckdb;
+  window.db     = db;
+  window.conn   = conn;
 </script>
 
 </body>
