@@ -147,9 +147,12 @@
 <script type="module">
   const baseURL = new URL('.', import.meta.url);
   const duckdb  = await import(new URL('./dist/duckdb-browser.mjs', baseURL));  // ←これ
-  const bundle = await duckdb.selectBundle({
-    locateFile: (f) => new URL('./dist/' + f, baseURL).toString()
-  });
+  const dist = new URL('./dist/', baseURL);
+  const bundle = {
+    mainModule:   new URL('duckdb-mvp.wasm', dist).toString(),
+    mainWorker:   new URL('duckdb-browser-mvp.worker.js', dist).toString(),
+    pthreadWorker:new URL('duckdb-browser-mvp.worker.js', dist).toString() // mvpはpthread未使用でも可
+  };
 
   const worker = new Worker(bundle.mainWorker);
 const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
