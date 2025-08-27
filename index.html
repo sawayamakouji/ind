@@ -154,9 +154,9 @@
 
   // 3) ★自動判定を使わず “mvp” を手動指定（必ず存在する2ファイル）
   const bundle = {
-    mainModule:    new URL('duckdb-mvp.wasm', dist).toString(),
-    mainWorker:    new URL('duckdb-browser-mvp.worker.js', dist).toString(),
-    pthreadWorker: new URL('duckdb-browser-mvp.worker.js', dist).toString() // mvpはpthread未使用でも可
+    mainModule:    new URL('duckdb-mvp.wasm', dist).href,
+    mainWorker:    new URL('duckdb-browser-mvp.worker.js', dist).href,
+    pthreadWorker: new URL('duckdb-browser-mvp.worker.js', dist).href // mvpはpthread未使用でも可
   };
   console.log('Bundle URLs', bundle); // ← Networkで200が返ってるかも確認
 
