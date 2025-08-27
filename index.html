@@ -151,7 +151,7 @@
 
   const worker = new Worker(bundle.mainWorker);
 const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+await db.instantiate(bundle);
 const conn = await db.connect();
 
 
