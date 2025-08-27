@@ -129,6 +129,14 @@
 
 <div id="result" class="mt"></div>
 
+
+<script type="importmap">
+{
+  "imports": {
+    "apache-arrow": "./dist/apache-arrow.mjs"
+  }
+}
+</script>
 <script type="module">
   // ★差し替え：duckdb-wasm.js → duckdb-browser.mjs
   const baseURL = new URL('.', import.meta.url);
