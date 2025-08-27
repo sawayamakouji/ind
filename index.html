@@ -255,7 +255,14 @@ console.log('DuckDB ready');
     }
 
     if (colCat.value) {
-      const cats = await conn.query(`SELECT DISTINCT "${colCat.value}" AS c FROM ${currentTable}_v WHERE c IS NOT NULL AND c <> '' ORDER BY c;`);
+      // OK: WHERE "元列名" ...
+const cats = await conn.query(
+  `SELECT DISTINCT "${colCat.value}" AS c
+     FROM ${currentTable}_v
+    WHERE "${colCat.value}" IS NOT NULL AND "${colCat.value}" <> ''
+    ORDER BY c;`
+);
+
       const list = cats.toArray().map(Object.fromEntries).map(r => r.c).filter(v => v!=null && v!=='');
       catEqEl.innerHTML = '<option value="">（無条件）</option>';
       list.forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; catEqEl.appendChild(o); });
