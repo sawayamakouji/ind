@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<meta charset="utf-8" />
+<title>DuckDB-WASM ローカルPOS集計ツール</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --gap: 12px; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; margin: 16px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .row { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap); align-items: end; }
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.04); }
+  label { display:block; font-size:12px; color:#444; margin-bottom:6px; }
+  input, select, button, textarea { width: 100%; padding: 8px 10px; border:1px solid #ccc; border-radius:8px; font-size:14px; box-sizing: border-box; }
+  button { cursor: pointer; }
+  small { color:#666; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 12px; }
+  th { background: #fafafa; position: sticky; top: 0; }
+  #status { color:#333; margin: 8px 0; }
+  .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+  .mt { margin-top: 12px; }
+  .muted { color:#666; }
+  .chip { display:inline-block; padding:2px 6px; border:1px solid #ddd; border-radius:999px; font-size:11px; margin-right:6px; }
+</style>
+
+<h1>ローカルPOS集計ツール（DuckDB-WASM／インストール不要）</h1>
+<div class="muted">CSVを読み込み、カテゴリ別や商品名別の販売点数／販売金額を高速に集計します。ファイルはPC内だけで処理され、外部送信されません。</div>
+
+<div class="card mt">
+  <div class="row">
+    <div style="grid-column: span 5;">
+      <label>CSVファイルを選択（UTF-8推奨）</label>
+      <input id="file" type="file" accept=".csv" />
+    </div>
+    <div style="grid-column: span 2;">
+      <label>テーブル名</label>
+      <input id="tbl" value="t" />
+    </div>
+    <div style="grid-column: span 2;">
+      <label>最大表示行数</label>
+      <input id="maxRows" type="number" value="1000" min="10" />
+    </div>
+    <div style="grid-column: span 3;">
+      <button id="load">① 読み込む</button>
+    </div>
+  </div>
+  <div id="status" class="mt">ファイル未読込み</div>
+  <div id="headers" class="mt"></div>
+</div>
+
+<div class="card mt">
+  <div class="grid-2">
+    <div>
+      <label>日付列</label>
+      <select id="colDate"></select>
+    </div>
+    <div>
+      <label>カテゴリ列</label>
+      <select id="colCat"></select>
+    </div>
+  </div>
+  <div class="grid-2 mt">
+    <div>
+      <label>商品名列</label>
+      <select id="colName"></select>
+    </div>
+    <div class="grid-2" style="grid-template-columns: 1fr 1fr; gap: var(--gap);">
+      <div>
+        <label>数量列</label>
+        <select id="colQty"></select>
+      </div>
+      <div>
+        <label>金額列</label>
+        <select id="colAmt"></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt">
+    <div style="grid-column: span 3;">
+      <label>期間（開始）</label>
+      <input id="from" type="date" />
+    </div>
+    <div style="grid-column: span 3;">
+      <label>期間（終了）</label>
+      <input id="to" type="date" />
+    </div>
+    <div style="grid-column: span 3;">
+      <label>カテゴリ＝</label>
+      <select id="catEq"><option value="">（無条件）</option></select>
+    </div>
+    <div style="grid-column: span 3;">
+      <label>商品名キーワード（部分一致）</label>
+      <input id="nameLike" placeholder="例：牛乳" />
+    </div>
+  </div>
+
+  <div class="row mt">
+    <div style="grid-column: span 3;">
+      <label>粒度（日/週/月）</label>
+      <select id="grain">
+        <option value="day">日</option>
+        <option value="week">週</option>
+        <option value="month" selected>月</option>
+      </select>
+    </div>
+    <div style="grid-column: span 3;">
+      <label>上位N件（ランキング系）</label>
+      <input id="topN" type="number" min="1" value="50" />
+    </div>
+    <div style="grid-column: span 6; display:flex; gap: var(--gap);">
+      <button id="q1">② カテゴリ別 合計</button>
+      <button id="q2">② 商品名キーワード 日/週/月 推移</button>
+      <button id="q3">② 指定カテゴリの月次サマリ</button>
+      <button id="q4">② 期間内 売上TopN商品</button>
+    </div>
+  </div>
+</div>
+
+<div class="card mt">
+  <label>任意SQL（上級者向け）</label>
+  <textarea id="sql" rows="6" placeholder="SELECT * FROM t LIMIT 50;"></textarea>
+  <div style="display:flex; gap: var(--gap); margin-top:8px;">
+    <button id="run">③ クエリ実行</button>
+    <button id="export">結果をCSVで保存</button>
+  </div>
+  <div class="mt muted">使える関数例：<span class="chip">strftime('%Y-%m', 日付)</span><span class="chip">DATE_TRUNC('week', 日付)</span><span class="chip">LIKE '%牛乳%'</span></div>
+</div>
+
+<div id="result" class="mt"></div>
+
+<script type="module">
+  import * as duckdb from "./dist/duckdb-wasm.js";
+  const bundle = duckdb.selectBundle({ locateFile: (f) => `./dist/${f}` });
+
+  // DuckDB 初期化（重複禁止！この1回だけ）
+  const worker = new Worker(bundle.mainWorker);
+  const logger = new duckdb.ConsoleLogger();
+  const db = new duckdb.AsyncDuckDB(logger, worker);
+  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  const conn = await db.connect();
+
+  const fmt = new Intl.NumberFormat('ja-JP');
+  const $ = (id) => document.getElementById(id);
+  const status = (msg) => $('status').textContent = msg;
+
+  const fileEl = $('file');
+  const loadBtn = $('load');
+  const runBtn = $('run');
+  const exportBtn = $('export');
+  const sqlBox = $('sql');
+  const tblBox = $('tbl');
+  const maxRowsEl = $('maxRows');
+  const resultDiv = $('result');
+  const headersDiv = $('headers');
+
+  const colDate = $('colDate'), colCat = $('colCat'), colName = $('colName'), colQty = $('colQty'), colAmt = $('colAmt');
+  const fromEl = $('from'), toEl = $('to'), catEqEl = $('catEq'), nameLikeEl = $('nameLike');
+  const grainEl = $('grain'), topNEl = $('topN');
+
+  const PRESET = {
+    date: '日付',
+    category: 'カテゴリー名',
+    name: '商品名',
+    qty: '販売点数',
+    amount: '販売金額'
+  };
+
+  let currentTable = 't';
+  let lastRows = [];
+  let headerList = [];
+
+  function renderHeaders(list) {
+    headersDiv.innerHTML = '';
+    if (!list?.length) return;
+    const wrap = document.createElement('div');
+    list.forEach(h => {
+      const s = document.createElement('span');
+      s.className = 'chip'; s.textContent = h; wrap.appendChild(s);
+    });
+    headersDiv.append('検出したヘッダ: ', wrap);
+  }
+
+  function fillSelectOptions(sel, list, preferKey) {
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option'); opt0.value = ''; opt0.textContent = '（未選択）'; sel.appendChild(opt0);
+    list.forEach(h => {
+      const o = document.createElement('option'); o.value = h; o.textContent = h; sel.appendChild(o);
+    });
+    if (preferKey && PRESET[preferKey] && list.includes(PRESET[preferKey])) {
+      sel.value = PRESET[preferKey];
+    }
+  }
+
+  const escQ = (s) => String(s).replace(/'/g, "''");
+
+  loadBtn.onclick = async () => {
+    const file = fileEl.files?.[0];
+    if (!file) { alert('CSVファイルを選択してください'); return; }
+    currentTable = (tblBox.value || 't').trim();
+    const maxRows = parseInt(maxRowsEl.value || '1000', 10);
+
+    status('読み込み中...');
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const path = `/tmp/${file.name}`;
+    await db.copyFileToFS(path, buf);
+
+    await conn.query(`DROP TABLE IF EXISTS ${currentTable};`);
+    await conn.query(`CREATE TABLE ${currentTable} AS SELECT * FROM read_csv_auto('${path}', HEADER=TRUE, SAMPLE_SIZE=-1);`);
+
+    const res = await conn.query(`PRAGMA table_info(${currentTable});`);
+    const rows = res.toArray().map(Object.fromEntries);
+    headerList = rows.map(r => r.name);
+    renderHeaders(headerList);
+
+    fillSelectOptions(colDate, headerList, 'date');
+    fillSelectOptions(colCat, headerList, 'category');
+    fillSelectOptions(colName, headerList, 'name');
+    fillSelectOptions(colQty, headerList, 'qty');
+    fillSelectOptions(colAmt, headerList, 'amount');
+
+    if (colDate.value) {
+      await conn.query(`CREATE OR REPLACE VIEW ${currentTable}_v AS SELECT *, TRY_CAST("${colDate.value}" AS DATE) AS __d FROM ${currentTable};`);
+      // 日付の最小/最大を期間ピッカーに自動セット
+      const mm = await conn.query(`SELECT MIN(__d) AS min_d, MAX(__d) AS max_d FROM ${currentTable}_v WHERE __d IS NOT NULL;`);
+      const [m] = mm.toArray().map(Object.fromEntries);
+      if (m?.min_d) fromEl.value = String(m.min_d).slice(0,10);
+      if (m?.max_d) toEl.value   = String(m.max_d).slice(0,10);
+    } else {
+      await conn.query(`CREATE OR REPLACE VIEW ${currentTable}_v AS SELECT * FROM ${currentTable};`);
+    }
+
+    // カテゴリプルダウン
+    if (colCat.value) {
+      const cats = await conn.query(`SELECT DISTINCT "${colCat.value}" AS c FROM ${currentTable}_v WHERE c IS NOT NULL AND c <> '' ORDER BY c;`);
+      const list = cats.toArray().map(Object.fromEntries).map(r => r.c).filter(v => v!=null && v!=='');
+      catEqEl.innerHTML = '<option value="">（無条件）</option>';
+      list.forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; catEqEl.appendChild(o); });
+    }
+
+    status(`読み込み完了：テーブル=${currentTable}（表示は先頭${maxRows}行まで）`);
+    const preview = await conn.query(`SELECT * FROM ${currentTable} LIMIT ${maxRows};`);
+    renderTable(preview, maxRows); // ← 上限反映
+  };
+
+  function grainExpr() {
+    if (!colDate.value) return null;
+    const g = grainEl.value;
+    if (g==='day') return `__d`;
+    if (g==='week') return `DATE_TRUNC('week', __d)`;
+    return `strftime('%Y-%m', __d)`;
+  }
+
+  function whereClauses() {
+    const w=[]; const dcol = colDate.value? '__d':null;
+    if (dcol){
+      if (fromEl.value) w.push(`${dcol} >= DATE '${escQ(fromEl.value)}'`);
+      if (toEl.value)   w.push(`${dcol} <= DATE '${escQ(toEl.value)}'`);
+    }
+    if (colCat.value && catEqEl.value) w.push(`"${colCat.value}" = '${escQ(catEqEl.value)}'`);
+    if (colName.value && nameLikeEl.value.trim()) w.push(`"${colName.value}" LIKE '%' || '${escQ(nameLikeEl.value.trim())}' || '%'`);
+    return w.length? ('WHERE '+w.join(' AND ')) : '';
+  }
+
+  function reqCols(...cols){ for(const c of cols) if(!c) throw new Error('列の指定が不足しています'); }
+
+  $('q1').onclick=async()=>{reqCols(colCat.value,colQty.value,colAmt.value);const where=whereClauses();sqlBox.value=`SELECT "${colCat.value}" AS カテゴリ, SUM("${colQty.value}") AS 販売点数合計, SUM("${colAmt.value}") AS 販売金額合計 FROM ${currentTable}_v ${where} GROUP BY 1 ORDER BY 販売金額合計 DESC;`;runBtn.click();};
+  $('q2').onclick=async()=>{reqCols(colDate.value,colName.value,colQty.value,colAmt.value);const g=grainExpr();if(!g){alert('日付列を選んでください');return;}const where=whereClauses();sqlBox.value=`SELECT ${g} AS 粒度, SUM("${colQty.value}") AS 販売点数, SUM("${colAmt.value}") AS 販売金額 FROM ${currentTable}_v ${where} GROUP BY 1 ORDER BY 1;`;runBtn.click();};
+  $('q3').onclick=async()=>{reqCols(colDate.value,colCat.value,colQty.value,colAmt.value);const where=whereClauses();sqlBox.value=`SELECT strftime('%Y-%m', __d) AS 月, "${colCat.value}" AS カテゴリ, SUM("${colQty.value}") AS 販売点数, SUM("${colAmt.value}") AS 販売金額 FROM ${currentTable}_v ${where} GROUP BY 1,2 ORDER BY 1,2;`;runBtn.click();};
+  $('q4').onclick=async()=>{reqCols(colName.value,colQty.value,colAmt.value);const where=whereClauses();sqlBox.value=`SELECT "${colName.value}" AS 商品名, SUM("${colQty.value}") AS 販売点数, SUM("${colAmt.value}") AS 販売金額 FROM ${currentTable}_v ${where} GROUP BY 1 ORDER BY 販売金額 DESC LIMIT ${topNEl.value||50};`;runBtn.click();};
+
+  runBtn.onclick=async()=>{try{status('クエリ実行中...');const res=await conn.query(sqlBox.value);renderTable(res,parseInt(maxRowsEl.value||'1000',10));}catch(e){alert('クエリエラー:'+e.message);status('エラー');}};
+  exportBtn.onclick=()=>{if(!lastRows.length){alert('エクスポートする結果がありません');return;}const headers=Object.keys(lastRows[0]||{});const csv=[headers.join(','),...lastRows.map(r=>headers.map(h=>{const v=r[h]??'';const s=String(v).replace(/"/g,'""');return /[",\n]/.test(s)?`"${s}"`:s;}).join(','))].join('\n');const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='query_result.csv';a.click();URL.revokeObjectURL(a.href);};
+
+  function renderTable(res,max=1000){
+    const rows = res.toArray().map(Object.fromEntries);
+    lastRows = rows;
+    resultDiv.innerHTML='';
+    const cnt = document.createElement('div');
+    cnt.textContent = `結果件数: ${fmt.format(rows.length)}（表示は先頭${Math.min(rows.length, max)}行）`;
+    resultDiv.appendChild(cnt);
+    if (!rows.length) return;
+    const headers = Object.keys(rows[0]);
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr');
+    headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
+    thead.appendChild(hr); table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    rows.slice(0, max).forEach(r => {
+      const tr = document.createElement('tr');
+      headers.forEach(h => { const td = document.createElement('td'); td.textContent = r[h]; tr.appendChild(td); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    resultDiv.appendChild(table);
+  }
+</script>
+
+</html>
