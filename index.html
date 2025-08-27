@@ -130,15 +130,21 @@
 <div id="result" class="mt"></div>
 
 <script type="module">
-  import * as duckdb from "./dist/duckdb-wasm.js";
-  const bundle = duckdb.selectBundle({ locateFile: (f) => `./dist/${f}` });
+  // ★差し替え：duckdb-wasm.js → duckdb-browser.mjs
+  const baseURL = new URL('.', import.meta.url);
+  const modURL  = new URL('./dist/duckdb-browser.mjs', baseURL);
+  const duckdb  = await import(modURL);  // <- ESMを動的import
 
-  // DuckDB 初期化（重複禁止！この1回だけ）
+  const bundle = duckdb.selectBundle({
+    // ★dist 内の .wasm / .worker.js をここから解決
+    locateFile: (f) => new URL('./dist/' + f, baseURL).toString()
+  });
+
   const worker = new Worker(bundle.mainWorker);
   const logger = new duckdb.ConsoleLogger();
-  const db = new duckdb.AsyncDuckDB(logger, worker);
+  const db     = new duckdb.AsyncDuckDB(logger, worker);
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-  const conn = await db.connect();
+  const conn   = await db.connect();
 
   const fmt = new Intl.NumberFormat('ja-JP');
   const $ = (id) => document.getElementById(id);
