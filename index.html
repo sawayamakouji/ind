@@ -1,8 +1,19 @@
 <!DOCTYPE html>
 <html lang="ja">
-<meta charset="utf-8" />
-<title>DuckDB-WASM ローカルPOS集計ツール</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<head>
+  <meta charset="utf-8" />
+  <title>DuckDB-WASM ローカルPOS集計ツール</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- ★ importmap（apache-arrow をローカルにマップ） -->
+  <script type="importmap">
+  {
+    "imports": {
+      "apache-arrow": "./dist/apache-arrow.mjs"
+    }
+  }
+  </script>
+
 <style>
   :root { --gap: 12px; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; margin: 16px; }
@@ -22,7 +33,7 @@
   .muted { color:#666; }
   .chip { display:inline-block; padding:2px 6px; border:1px solid #ddd; border-radius:999px; font-size:11px; margin-right:6px; }
 </style>
-
+</head>
 <h1>ローカルPOS集計ツール（DuckDB-WASM／インストール不要）</h1>
 <div class="muted">CSVを読み込み、カテゴリ別や商品名別の販売点数／販売金額を高速に集計します。ファイルはPC内だけで処理され、外部送信されません。</div>
 
@@ -130,13 +141,7 @@
 <div id="result" class="mt"></div>
 
 
-<script type="importmap">
-{
-  "imports": {
-    "apache-arrow": "./dist/apache-arrow.mjs"
-  }
-}
-</script>
+
 <script type="module">
   // ★差し替え：duckdb-wasm.js → duckdb-browser.mjs
   const baseURL = new URL('.', import.meta.url);
