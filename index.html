@@ -152,27 +152,30 @@
   // 2) DuckDB 本体（ブラウザ用ESM）を読む
   const duckdb = await import(new URL('duckdb-browser.mjs', dist));
 
-  // 3) ★自動判定を使わず “mvp” を手動指定（必ず存在する2ファイル）
-  const bundle = {
-    mainModule:    new URL('duckdb-mvp.wasm', dist).href,
-    mainWorker:    new URL('duckdb-browser-mvp.worker.js', dist).href,
-    pthreadWorker: new URL('duckdb-browser-mvp.worker.js', dist).href // mvpはpthread未使用でも可
-  };
-  console.log('Bundle URLs', bundle); // ← Networkで200が返ってるかも確認
+// 2) mvp の URL を決める（クエリでキャッシュ無効化も付ける）
+const wasmURL   = new URL('duckdb-mvp.wasm?v=1', dist).href;
+const workerURL = new URL('duckdb-browser-mvp.worker.js?v=1', dist).href;
 
-  // 4) DuckDB 初期化
-  const worker = new Worker(bundle.mainWorker);            // classic worker
-  const logger = new duckdb.ConsoleLogger();
-  const db     = new duckdb.AsyncDuckDB(logger, worker);
+// 3) ★WASM をこちらで取得してコンパイル（Workerにfetchさせない）
+const resp = await fetch(wasmURL, { cache: 'no-store' });
+if (!resp.ok) {
+  throw new Error(`WASM fetch failed: ${resp.status} ${resp.statusText} (${wasmURL})`);
+}
+const wasmModule = await WebAssembly.compile(await resp.arrayBuffer());
 
-  try {
-    await db.instantiate(bundle);                          // ★Bundle 丸ごと渡す
-  } catch (e) {
-    console.error('instantiate failed', e);
-    throw e;
-  }
-  const conn = await db.connect();
-  console.log('DuckDB ready');
+// 4) DuckDB 初期化（mainModule には “コンパイル済みモジュール” を渡す）
+const bundle = {
+  mainModule:    wasmModule,     // ← 文字列URLではなく Module を渡す
+  mainWorker:    workerURL,
+  pthreadWorker: workerURL       // mvp は pthread 未使用でもOK
+};
+console.log('Bundle ready', { wasmURL, workerURL });
+
+const worker = new Worker(bundle.mainWorker);
+const db     = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+await db.instantiate(bundle);
+const conn   = await db.connect();
+console.log('DuckDB ready');
 
   // ======= ここから下はあなたの既存コード（そのまま） =======
   const fmt = new Intl.NumberFormat('ja-JP');
